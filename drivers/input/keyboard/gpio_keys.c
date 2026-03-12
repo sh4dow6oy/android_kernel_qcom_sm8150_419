@@ -30,6 +30,7 @@
 #include <linux/of.h>
 #include <linux/of_irq.h>
 #include <linux/spinlock.h>
+#include <dt-bindings/input/gpio-keys.h>
 
 struct device *sec_key;
 EXPORT_SYMBOL(sec_key);
@@ -49,7 +50,6 @@ extern int pkey_pressed_count(int clear);
 #define GET_KEY_COUNT		0
 #define CLEAR_KEY_COUNT		1
 #endif
-
 struct gpio_button_data {
 	struct gpio_keys_button *button;
 	struct input_dev *input;
@@ -64,6 +64,7 @@ struct gpio_button_data {
 	unsigned int software_debounce;	/* in msecs, for GPIO-driven buttons */
 
 	unsigned int irq;
+	unsigned int wakeup_trigger_type;
 	spinlock_t lock;
 	bool disabled;
 	bool key_pressed;
@@ -215,7 +216,7 @@ static ssize_t gpio_keys_attr_show_helper(struct gpio_keys_drvdata *ddata,
 	ssize_t ret;
 	int i;
 
-	bits = kcalloc(BITS_TO_LONGS(n_events), sizeof(*bits), GFP_KERNEL);
+	bits = bitmap_zalloc(n_events, GFP_KERNEL);
 	if (!bits)
 		return -ENOMEM;
 
@@ -235,7 +236,7 @@ static ssize_t gpio_keys_attr_show_helper(struct gpio_keys_drvdata *ddata,
 	buf[ret++] = '\n';
 	buf[ret] = '\0';
 
-	kfree(bits);
+	bitmap_free(bits);
 
 	return ret;
 }
@@ -259,7 +260,7 @@ static ssize_t gpio_keys_attr_store_helper(struct gpio_keys_drvdata *ddata,
 	ssize_t error;
 	int i;
 
-	bits = kcalloc(BITS_TO_LONGS(n_events), sizeof(*bits), GFP_KERNEL);
+	bits = bitmap_zalloc(n_events, GFP_KERNEL);
 	if (!bits)
 		return -ENOMEM;
 
@@ -303,7 +304,7 @@ static ssize_t gpio_keys_attr_store_helper(struct gpio_keys_drvdata *ddata,
 	mutex_unlock(&ddata->disable_lock);
 
 out:
-	kfree(bits);
+	bitmap_free(bits);
 	return error;
 }
 
@@ -582,7 +583,6 @@ static struct attribute *sec_key_attrs[] = {
 static struct attribute_group sec_key_attr_group = {
 	.attrs = sec_key_attrs,
 };
-
 static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
 {
 	const struct gpio_keys_button *button = bdata->button;
@@ -655,9 +655,9 @@ static irqreturn_t gpio_keys_gpio_isr(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static void gpio_keys_irq_timer(unsigned long _data)
+static void gpio_keys_irq_timer(struct timer_list *t)
 {
-	struct gpio_button_data *bdata = (struct gpio_button_data *)_data;
+	struct gpio_button_data *bdata = from_timer(bdata, t, release_timer);
 	struct input_dev *input = bdata->input;
 	unsigned long flags;
 
@@ -776,6 +776,8 @@ static int gpio_keys_setup_key(struct platform_device *pdev,
 	}
 
 	if (bdata->gpiod) {
+		bool active_low = gpiod_is_active_low(bdata->gpiod);
+
 		if (button->debounce_interval) {
 			error = gpiod_set_debounce(bdata->gpiod,
 					button->debounce_interval * 1000);
@@ -804,6 +806,24 @@ static int gpio_keys_setup_key(struct platform_device *pdev,
 		isr = gpio_keys_gpio_isr;
 		irqflags = IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING;
 
+		switch (button->wakeup_event_action) {
+		case EV_ACT_ASSERTED:
+			bdata->wakeup_trigger_type = active_low ?
+				IRQ_TYPE_EDGE_FALLING : IRQ_TYPE_EDGE_RISING;
+			break;
+		case EV_ACT_DEASSERTED:
+			bdata->wakeup_trigger_type = active_low ?
+				IRQ_TYPE_EDGE_RISING : IRQ_TYPE_EDGE_FALLING;
+			break;
+		case EV_ACT_ANY:
+			/* fall through */
+		default:
+			/*
+			 * For other cases, we are OK letting suspend/resume
+			 * not reconfigure the trigger type.
+			 */
+			break;
+		}
 	} else {
 		if (!button->irq) {
 			dev_err(dev, "Found button without gpio or irq\n");
@@ -818,11 +838,15 @@ static int gpio_keys_setup_key(struct platform_device *pdev,
 		}
 
 		bdata->release_delay = button->debounce_interval;
-		setup_timer(&bdata->release_timer,
-			    gpio_keys_irq_timer, (unsigned long)bdata);
+		timer_setup(&bdata->release_timer, gpio_keys_irq_timer, 0);
 
 		isr = gpio_keys_irq_isr;
 		irqflags = 0;
+
+		/*
+		 * For IRQ buttons, there is no interrupt for release.
+		 * So we don't need to reconfigure the trigger type for wakeup.
+		 */
 	}
 
 	bdata->code = &ddata->keymap[idx];
@@ -955,7 +979,11 @@ gpio_keys_get_devtree_pdata(struct device *dev)
 			fwnode_property_read_bool(child, "wakeup-source") ||
 			/* legacy name */
 			fwnode_property_read_bool(child, "gpio-key,wakeup");
-		button->wakeup_default = button->wakeup;
+
+			button->wakeup_default = button->wakeup;
+
+		fwnode_property_read_u32(child, "wakeup-event-action",
+					 &button->wakeup_event_action);
 
 		button->can_disable =
 			fwnode_property_read_bool(child, "linux,can-disable");
@@ -1063,9 +1091,6 @@ static int gpio_keys_probe(struct platform_device *pdev)
 			wakeup = 1;
 	}
 
-	if (pdata->wakeup_enable)
-		wakeup = 1;
-
 	fwnode_handle_put(child);
 
 	error = devm_device_add_group(dev, &gpio_keys_attr_group);
@@ -1082,8 +1107,11 @@ static int gpio_keys_probe(struct platform_device *pdev)
 		return error;
 	}
 
+	if (pdata->wakeup_enable)
+		wakeup = 1;
+
 #ifdef CONFIG_DRV_SAMSUNG
-	sec_key = sec_device_create(13, NULL, "sec_key");
+	sec_key = sec_device_create(NULL, "sec_key");
 #else
 	sec_key = device_create(sec_class, NULL, 13, NULL, "sec_key");
 #endif
@@ -1096,25 +1124,117 @@ static int gpio_keys_probe(struct platform_device *pdev)
 			error);
 	}
 	dev_set_drvdata(sec_key, ddata);
-
 	device_init_wakeup(dev, wakeup);
 
 	return 0;
+}
+
+static int __maybe_unused
+gpio_keys_button_enable_wakeup(struct gpio_button_data *bdata)
+{
+	int error;
+
+	error = enable_irq_wake(bdata->irq);
+	if (error) {
+		dev_err(bdata->input->dev.parent,
+			"failed to configure IRQ %d as wakeup source: %d\n",
+			bdata->irq, error);
+		return error;
+	}
+
+	if (bdata->wakeup_trigger_type) {
+		error = irq_set_irq_type(bdata->irq,
+					 bdata->wakeup_trigger_type);
+		if (error) {
+			dev_err(bdata->input->dev.parent,
+				"failed to set wakeup trigger %08x for IRQ %d: %d\n",
+				bdata->wakeup_trigger_type, bdata->irq, error);
+			disable_irq_wake(bdata->irq);
+			return error;
+		}
+	}
+
+	return 0;
+}
+
+static void __maybe_unused
+gpio_keys_button_disable_wakeup(struct gpio_button_data *bdata)
+{
+	int error;
+
+	/*
+	 * The trigger type is always both edges for gpio-based keys and we do
+	 * not support changing wakeup trigger for interrupt-based keys.
+	 */
+	if (bdata->wakeup_trigger_type) {
+		error = irq_set_irq_type(bdata->irq, IRQ_TYPE_EDGE_BOTH);
+		if (error)
+			dev_warn(bdata->input->dev.parent,
+				 "failed to restore interrupt trigger for IRQ %d: %d\n",
+				 bdata->irq, error);
+	}
+
+	error = disable_irq_wake(bdata->irq);
+	if (error)
+		dev_warn(bdata->input->dev.parent,
+			 "failed to disable IRQ %d as wake source: %d\n",
+			 bdata->irq, error);
+}
+
+static int __maybe_unused
+gpio_keys_enable_wakeup(struct gpio_keys_drvdata *ddata)
+{
+	struct gpio_button_data *bdata;
+	int error;
+	int i;
+
+	for (i = 0; i < ddata->pdata->nbuttons; i++) {
+		bdata = &ddata->data[i];
+		if (bdata->button->wakeup) {
+			error = gpio_keys_button_enable_wakeup(bdata);
+			if (error)
+				goto err_out;
+		}
+		bdata->suspended = true;
+	}
+
+	return 0;
+
+err_out:
+	while (i--) {
+		bdata = &ddata->data[i];
+		if (bdata->button->wakeup)
+			gpio_keys_button_disable_wakeup(bdata);
+		bdata->suspended = false;
+	}
+
+	return error;
+}
+
+static void __maybe_unused
+gpio_keys_disable_wakeup(struct gpio_keys_drvdata *ddata)
+{
+	struct gpio_button_data *bdata;
+	int i;
+
+	for (i = 0; i < ddata->pdata->nbuttons; i++) {
+		bdata = &ddata->data[i];
+		bdata->suspended = false;
+		if (irqd_is_wakeup_set(irq_get_irq_data(bdata->irq)))
+			gpio_keys_button_disable_wakeup(bdata);
+	}
 }
 
 static int __maybe_unused gpio_keys_suspend(struct device *dev)
 {
 	struct gpio_keys_drvdata *ddata = dev_get_drvdata(dev);
 	struct input_dev *input = ddata->input;
-	int i;
+	int error;
 
 	if (device_may_wakeup(dev)) {
-		for (i = 0; i < ddata->pdata->nbuttons; i++) {
-			struct gpio_button_data *bdata = &ddata->data[i];
-			if (bdata->button->wakeup)
-				enable_irq_wake(bdata->irq);
-			bdata->suspended = true;
-		}
+		error = gpio_keys_enable_wakeup(ddata);
+		if (error)
+			return error;
 	} else {
 		mutex_lock(&input->mutex);
 		if (input->users)
@@ -1130,15 +1250,9 @@ static int __maybe_unused gpio_keys_resume(struct device *dev)
 	struct gpio_keys_drvdata *ddata = dev_get_drvdata(dev);
 	struct input_dev *input = ddata->input;
 	int error = 0;
-	int i;
 
 	if (device_may_wakeup(dev)) {
-		for (i = 0; i < ddata->pdata->nbuttons; i++) {
-			struct gpio_button_data *bdata = &ddata->data[i];
-			if (bdata->button->wakeup)
-				disable_irq_wake(bdata->irq);
-			bdata->suspended = false;
-		}
+		gpio_keys_disable_wakeup(ddata);
 	} else {
 		mutex_lock(&input->mutex);
 		if (input->users)
@@ -1174,7 +1288,7 @@ static void __exit gpio_keys_exit(void)
 	platform_driver_unregister(&gpio_keys_device_driver);
 }
 
-late_initcall(gpio_keys_init);
+module_init(gpio_keys_init);
 module_exit(gpio_keys_exit);
 
 MODULE_LICENSE("GPL");
