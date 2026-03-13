@@ -291,7 +291,7 @@ static int hall_probe(struct platform_device *pdev)
 	init_hall_ic_irq(input);
 
 	if (ddata->gpio_flip_cover != 0) {
-		hall_ic = sec_device_create(0, ddata, "hall_ic");
+		hall_ic = sec_device_create(ddata, "hall_ic");
 
 		error = device_create_file(hall_ic, &dev_attr_hall_detect);
 		if (error < 0) {
