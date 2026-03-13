@@ -1118,6 +1118,12 @@ again:
 			input_sync(pon->pon_input);
 		}
 
+		input_report_key(pon->pon_input, cfg->key_code, key_status);
+		input_sync(pon->pon_input);
+		pr_info("%s %s: %d, 0x%x, 0x%x, %d\n", SECLOG, __func__, cfg->key_code, pon_rt_sts_ori, pon_rt_sts, !!key_status);
+	} else
+		pr_debug("%s %s: %d, 0x%x, 0x%x, %d (skip)\n", SECLOG, __func__, cfg->key_code, pon_rt_sts_ori, pon_rt_sts, !!key_status);
+
 #if defined(CONFIG_SEC_PM)
 	/* RESIN is used for VOL DOWN key, it should report the keycode for kernel panic */
 	if (cfg->key_code && (cfg->pon_type == PON_RESIN) && (pon_rt_sts & pon_rt_bit)) {
@@ -2365,7 +2371,9 @@ static ssize_t sysfs_powerkey_onoff_show(struct device *dev,
 	if (check_pkey_press || check_resinkey_press)
 		state = 1;
 #endif
-	return 0
+	pr_info("%s %s: key state:%d\n", SECLOG, __func__, state);
+
+	return snprintf(buf, 5, "%d\n", state);
 }
 
 static ssize_t powerkey_pressed_count_show(struct device *dev,
@@ -2379,7 +2387,9 @@ static ssize_t powerkey_pressed_count_show(struct device *dev,
 			resinkey_pressed_count(GET_KEY_COUNT),
 			pkey_pressed_count(GET_KEY_COUNT));
 #endif
-	return 0
+	pr_info("%s %s: %s\n", SECLOG, __func__, buff);
+
+	return snprintf(buf, 40, "%s", buff);
 }
 
 static ssize_t powerkey_pressed_count_store(struct device *dev,
