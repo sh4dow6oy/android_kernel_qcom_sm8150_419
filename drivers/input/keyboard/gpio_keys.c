@@ -888,9 +888,6 @@ static int gpio_keys_probe(struct platform_device *pdev)
 		return error;
 	}
 	
-		if (pdata->wakeup_enable)
-		wakeup = 1;
-
 	#ifdef CONFIG_DRV_SAMSUNG
 		sec_key = sec_device_create(NULL, "sec_key");
 	#else
