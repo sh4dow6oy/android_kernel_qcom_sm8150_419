@@ -1113,16 +1113,22 @@ again:
 		 * Simulate a press event in case release event occurred without a press
 		 * event
 		 */
-		if (!cfg->old_state && !key_status) {
-			input_report_key(pon->pon_input, cfg->key_code, 1);
-			input_sync(pon->pon_input);
-		}
+	if (pon->log_kpd_event && (cfg->pon_type == PON_KPDPWR))
+		pr_info_ratelimited("PMIC input: KPDPWR status=0x%02x, KPDPWR_ON=%d\n",
+			pon_rt_sts, (pon_rt_sts & QPNP_PON_KPDPWR_ON));
 
-		input_report_key(pon->pon_input, cfg->key_code, key_status);
+	if (!cfg->old_state && !key_status) {
+		input_report_key(pon->pon_input, cfg->key_code, 1);
 		input_sync(pon->pon_input);
-		pr_info("%s %s: %d, 0x%x, 0x%x, %d\n", SECLOG, __func__, cfg->key_code, pon_rt_sts_ori, pon_rt_sts, !!key_status);
-	} else
-		pr_debug("%s %s: %d, 0x%x, 0x%x, %d (skip)\n", SECLOG, __func__, cfg->key_code, pon_rt_sts_ori, pon_rt_sts, !!key_status);
+	}
+
+	input_report_key(pon->pon_input, cfg->key_code, key_status);
+	input_sync(pon->pon_input);
+
+	cfg->old_state = !!key_status;
+
+	return 0;
+}
 
 #if defined(CONFIG_SEC_PM)
 	/* RESIN is used for VOL DOWN key, it should report the keycode for kernel panic */
@@ -2366,41 +2372,6 @@ static ssize_t sysfs_powerkey_onoff_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
 	int state = 0;
-
-#if defined(CONFIG_SEC_PM)
-	if (check_pkey_press || check_resinkey_press)
-		state = 1;
-#endif
-	pr_info("%s %s: key state:%d\n", SECLOG, __func__, state);
-
-	return snprintf(buf, 5, "%d\n", state);
-}
-
-static ssize_t powerkey_pressed_count_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	char buff[40] = { 0 };
-
-#if defined(CONFIG_SEC_PM)
-	snprintf(buff, 40, "\"%s\":\"%d\",\"KPWR\":\"%d\"",
-			(get_resin_keycode() == KEY_RESET) ? "KRST" : "KVDN",
-			resinkey_pressed_count(GET_KEY_COUNT),
-			pkey_pressed_count(GET_KEY_COUNT));
-#endif
-	pr_info("%s %s: %s\n", SECLOG, __func__, buff);
-
-	return snprintf(buf, 40, "%s", buff);
-}
-
-static ssize_t powerkey_pressed_count_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count)
-{
-#if defined(CONFIG_SEC_PM)
-	resinkey_pressed_count(CLEAR_KEY_COUNT);
-	pkey_pressed_count(CLEAR_KEY_COUNT);
-#endif
-	return count;
-}
 
 static DEVICE_ATTR(sec_powerkey_pressed, 0444, sysfs_powerkey_onoff_show, NULL);
 static DEVICE_ATTR(powerkey_pressed_count, 0664, powerkey_pressed_count_show, powerkey_pressed_count_store);
