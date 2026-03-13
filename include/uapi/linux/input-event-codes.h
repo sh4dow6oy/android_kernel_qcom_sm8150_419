@@ -339,7 +339,7 @@
 #define KEY_MICMUTE		248	/* Mute / unmute the microphone */
 
 #define KEY_WAKEUP_UNLOCK	253	/* Wake-up to recent view, ex: AOP */
-#define KEY_RECENT		254
+#define KEY_RECENT   		254
 #define KEY_INT_CANCEL		0x2be	/* for touch event skip */
 
 /* Code 255 is reserved for special needs of AT keyboard driver */
@@ -365,9 +365,6 @@
 #define BTN_FORWARD		0x115
 #define BTN_BACK		0x116
 #define BTN_TASK		0x117
-
-#define BTN_PALM		0x118    /* palm flag */
-#define BTN_LARGE_PALM		0x119    /* large palm flag */
 
 #define BTN_JOYSTICK		0x120
 #define BTN_TRIGGER		0x120
@@ -416,7 +413,6 @@
 #define BTN_TOOL_MOUSE		0x146
 #define BTN_TOOL_LENS		0x147
 #define BTN_TOOL_QUINTTAP	0x148	/* Five fingers on trackpad */
-#define BTN_STYLUS3		0x149
 #define BTN_TOUCH		0x14a
 #define BTN_STYLUS		0x14b
 #define BTN_STYLUS2		0x14c
@@ -610,8 +606,6 @@
 #define BTN_DPAD_RIGHT		0x223
 
 #define KEY_ALS_TOGGLE		0x230	/* Ambient light sensor */
-#define KEY_ROTATE_LOCK_TOGGLE	0x231	/* Display rotation lock */
-#define KEY_REFRESH_RATE_TOGGLE	0x232	/* Display refresh rate toggle */
 
 #define KEY_BUTTONCONFIG		0x240	/* AL Button Configuration */
 #define KEY_TASKMANAGER		0x241	/* AL Task/Project Manager */
@@ -714,6 +708,16 @@
 #define BTN_HOTKEY_APP2 		0x2f6
 #define BTN_HOTKEY_APP3 		0x2f7
 
+/* Custom fingerprint gestures keys */
+#define KEY_FP_GESTURE_UP		0x2e8
+#define KEY_FP_GESTURE_DOWN		0x2e9
+#define KEY_FP_GESTURE_LEFT		0x2ea
+#define KEY_FP_GESTURE_RIGHT		0x2eb
+#define KEY_FP_GESTURE_LONG_PRESS	0x2ec
+#define KEY_FP_GESTURE_TAP		0x2ed
+
+/* 0x2f1~2f8 is key event for specail event. */
+
 /* We avoid low common keys in module aliases so they don't get huge. */
 #define KEY_MIN_INTERESTING	KEY_MUTE
 #define KEY_MAX			0x2ff
@@ -795,6 +799,8 @@
 #define ABS_MT_TOOL_Y		0x3d	/* Center Y tool position */
 
 #define ABS_MT_CUSTOM		0x3e	/* custom event */
+#define ABS_MT_CUSTOM2		0x3f	/* custom event only for sensor */
+#define ABS_MT_PALM		0x3e	/* palm touch */
 #define ABS_MT_GRIP		0x3f	/* grip touch */
 
 #define ABS_MAX			0x3f
@@ -822,12 +828,12 @@
 #define SW_LINEIN_INSERT	0x0d  /* set = inserted */
 #define SW_MUTE_DEVICE		0x0e  /* set = device disabled */
 #define SW_PEN_INSERTED		0x0f  /* set = pen inserted */
-#define SW_MACHINE_COVER	0x10  /* set = cover closed */
-#define SW_HPHL_OVERCURRENT	0x11  /* set = over current on left hph */
-#define SW_HPHR_OVERCURRENT	0x12  /* set = over current on right hph */
+#define SW_HPHL_OVERCURRENT	0x10  /* set = over current on left hph */
+#define SW_HPHR_OVERCURRENT	0x11  /* set = over current on right hph */
+#define SW_MICROPHONE2_INSERT	0x12  /* set = inserted */
+#define SW_UNSUPPORT_INSERT	0x13  /* set = unsupported device inserted */
 #define SW_PEN_INSERT		0x13  /* set = pen insert, remove */
-#define SW_MICROPHONE2_INSERT	0x13  /* set = inserted */
-#define SW_UNSUPPORT_INSERT	0x14  /* set = unsupported device inserted */
+#define SW_MACHINE_COVER	0x14  /* set = cover closed */
 #define SW_GLOVE		0x20  /* set = glove mode */
 #define SW_MAX			0x20
 #define SW_CNT			(SW_MAX+1)
