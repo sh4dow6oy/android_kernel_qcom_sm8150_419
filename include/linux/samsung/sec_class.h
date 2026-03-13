@@ -13,9 +13,6 @@ extern struct device *___sec_device_create(void *drvdata, const char *fmt);
 #else
 #define sec_device_create(__drvdata, __fmt)				\
 	___sec_device_create(__drvdata, __fmt)
-#else
-#define sec_device_create(...)	(NULL)
-	___sec_device_create(NULL)
 #endif
 #else /* CONFIG_DRV_SAMSUNG */
 static inline struct device *sec_dev_get_by_name(const char *name) { return NULL; }
